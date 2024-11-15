@@ -1,111 +1,145 @@
-<html>
+<!DOCTYPE html>
+<html lang="en">
   <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Object Detection with TensorFlow.js</title>
     <style>
       #results {
-	  position: fixed;
-	  top: 50px;
-	  left: 10px;
-	  color: white;
+        position: fixed;
+        top: 50px;
+        left: 10px;
+        color: white;
+        font-size: 16px;
+        max-height: 90%;
+        overflow-y: scroll;
       }
 
       #results span {
-	  margin: 5px 5px;
-      }
-      
-      video {
-	  position: fixed;
-	  top: 0;
-	  left: 0;
+        margin: 5px 5px;
       }
 
-      h1 {
-	  position: fixed;
-	  bottom: 0;
-	  left: 0;
+      video {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
       }
 
       button {
-	  position: fixed;
-	  top: 0;
-	  left: 0;
+        position: fixed;
+        top: 10px;
+        left: 10px;
+        padding: 10px;
+        background-color: #4caf50;
+        color: white;
+        font-size: 16px;
+        border: none;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background-color: #45a049;
       }
     </style>
   </head>
+
   <body>
-    <!-- Basic Cloud Vision (Google) Demo -->
+    <!-- Basic Object Detection with TensorFlow.js -->
 
     <video autoplay="true" id="videoElement"></video>
     <button id="vision_button">Analyze</button>
-    <div id='results'></div>
-    
-    <script>
+    <div id="results"></div>
 
-      // Access camera 
-      var video = document.querySelector("#videoElement");      
-      if (navigator.mediaDevices.getUserMedia) {       
-	  navigator.mediaDevices.getUserMedia({video: true})
-	      .then(function(stream) {
-		  video.srcObject = stream;
-	      })
-	      .catch(function(err) {
-		  console.log("Something went wrong!");
-	      });
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+
+    <script>
+      // Access camera
+      const video = document.querySelector("#videoElement");
+      if (navigator.mediaDevices.getUserMedia) {
+        navigator.mediaDevices
+          .getUserMedia({ video: true })
+          .then(function (stream) {
+            video.srcObject = stream;
+          })
+          .catch(function (err) {
+            console.log("Something went wrong!");
+          });
       }
 
-      // We only get to work when the vision button is clicked
-      document.querySelector("#vision_button").addEventListener('click', evt => {
-	  // extract image as base64, scale it down to reduce data transfer speed	  
-	  var scale = 0.25;
-	  var canvas = document.createElement("canvas");
-          canvas.width = video.videoWidth * scale;
-          canvas.height = video.videoHeight * scale;
-          canvas.getContext('2d')
-              .drawImage(video, 0, 0, canvas.width, canvas.height);
+      let model;
+      // Load the COCO-SSD model for object detection
+      async function loadModel() {
+        model = await cocoSsd.load();
+        console.log("Model loaded!");
+        detectObjects();
+      }
 
-	  // dataUrl contains base64 version of image
-          var dataUrl = canvas.toDataURL();
+      // Function to detect objects continuously
+      async function detectObjects() {
+        if (!model) {
+          console.log("Model is not loaded yet");
+          return;
+        }
 
-	  // Send image to google to analyze
-	  // Documentation of the annotate feature: https://cloud.google.com/vision/docs/reference/rest/v1/images/annotate 
-	  fetch('https://vision.googleapis.com/v1/images:annotate?key=AIzaSyBc7VMHDMfnsOcIZmD-YAsB9xOe5tefURI', {
-	      method: 'POST',
-	      headers: {
-		  'Content-Type': 'application/json'
-	      },
-	      body: JSON.stringify({
-		  requests: [
-		      {
-			  features: {
-			      type: 'LABEL_DETECTION'
-			  },
-			  image: {
-			      // have to extract only the image data from dataURL
-			      content: dataUrl.substring('data:image/png;base64,'.length)
-			  }
-		      }
-		  ]
-	      })
-	  }).then( resp => {
-	      return resp.json();
-	  }).then( json => {
-	      // Simply output the response
-	      console.log(json);
-	      results.innerHTML = '';
-	      json.responses[0].labelAnnotations.forEach( annotation => {
-		  let description = document.createElement('span');
-		  let score = document.createElement('span');
+        // Extract image from video feed (scale down)
+        const scale = 0.25;
+        const canvas = document.createElement("canvas");
+        canvas.width = video.videoWidth * scale;
+        canvas.height = video.videoHeight * scale;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-		  let div = document.createElement('div');
-		  description.innerText = annotation.description;
-		  score.innerText = annotation.score;
+        // Detect objects in the image
+        const predictions = await model.detect(canvas);
+        console.log(predictions);
 
-		  div.append(description,score);
+        // Clear previous results
+        document.getElementById("results").innerHTML = "";
 
-		  results.append(div);
-	      });
-	  });
-      });
-      
+        // Display predictions for each object detected
+        predictions.forEach((prediction) => {
+          // Only show predictions with high confidence (e.g., above 0.5)
+          if (prediction.score > 0.5) {
+            const description = document.createElement("span");
+            const score = document.createElement("span");
+            const div = document.createElement("div");
+
+            description.innerText = `Object: ${prediction.class}`;
+            score.innerText = `Confidence: ${prediction.score.toFixed(2)}`;
+
+            div.append(description, score);
+            document.getElementById("results").append(div);
+
+            // Optionally, draw bounding boxes on the canvas
+            ctx.beginPath();
+            ctx.rect(
+              prediction.bbox[0], // x
+              prediction.bbox[1], // y
+              prediction.bbox[2], // width
+              prediction.bbox[3] // height
+            );
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = "red";
+            ctx.fillStyle = "red";
+            ctx.stroke();
+            ctx.fillText(
+              `${prediction.class} (${Math.round(prediction.score * 100)}%)`,
+              prediction.bbox[0],
+              prediction.bbox[1] > 10 ? prediction.bbox[1] - 5 : 10
+            );
+          }
+        });
+
+        // Repeat the detection process for continuous analysis
+        requestAnimationFrame(detectObjects);
+      }
+
+      // Load the model when the page is loaded
+      window.onload = loadModel;
     </script>
   </body>
 </html>
